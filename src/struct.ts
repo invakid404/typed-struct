@@ -1,26 +1,7 @@
 /* eslint-disable no-bitwise,max-classes-per-file,no-use-before-define,object-shorthand,@typescript-eslint/no-explicit-any */
-import { inspect } from 'util';
-
-import type { decode as Decode, encode as Encode } from 'iconv-lite';
+import { Buffer } from "https://cdn.skypack.dev/buffer?dts";
 
 export type ExtractType<C> = C extends new () => infer T ? Omit<T, '__struct' | 'toJSON'> : never;
-
-let iconvDecode: typeof Decode | undefined;
-let iconvEncode: typeof Encode | undefined;
-
-// eslint-disable-next-line import/no-extraneous-dependencies
-import('iconv-lite')
-  .then(({ encode, decode }) => {
-    iconvEncode = encode;
-    iconvDecode = decode;
-  })
-  .catch(
-    /* istanbul ignore next */
-    () => {
-      iconvEncode = undefined;
-      iconvDecode = undefined;
-    }
-  );
 
 type FilterFlags<Base, Condition> = {
   [Key in keyof Base]: Base[Key] extends Condition ? Key : never;
@@ -318,7 +299,7 @@ const encodeMaskedValue = (
 const getValue = (
   info: PropDesc<SimpleTypes>,
   data: Buffer
-): bigint | number | boolean | undefined => {
+): BigInt | number | boolean | undefined => {
   // if (!isSimpleType(info)) throw new TypeError('Invalid type');
   const { len, offset, type, mask, be, tail } = info;
   /* istanbul ignore next */
@@ -327,7 +308,7 @@ const getValue = (
   switch (type) {
     case PropType.UInt8:
       // offset may be negative
-      return decodeMaskedValue(data.slice(offset).readUInt8(), 8, mask);
+      return decodeMaskedValue(data.slice(offset).readUInt8(0), 8, mask);
     case PropType.Int8:
       /* istanbul ignore next */
       if (mask !== undefined) throw new TypeError('Signed types do not support bit masks');
@@ -335,7 +316,7 @@ const getValue = (
     case PropType.UInt16:
       // offset may be negative
       return decodeMaskedValue(
-        be ? data.slice(offset).readUInt16BE() : data.slice(offset).readUInt16LE(),
+        be ? data.slice(offset).readUInt16BE(0) : data.slice(offset).readUInt16LE(0),
         16,
         mask
       );
@@ -346,7 +327,7 @@ const getValue = (
     case PropType.UInt32:
       // offset may be negative
       return decodeMaskedValue(
-        be ? data.slice(offset).readUInt32BE() : data.slice(offset).readUInt32LE(),
+        be ? data.slice(offset).readUInt32BE(0) : data.slice(offset).readUInt32LE(0),
         32,
         mask
       );
@@ -399,7 +380,7 @@ const setValue = (
   switch (type) {
     case PropType.UInt8:
       // offset may be negative
-      data.slice(offset).writeUInt8(encode(value, 8));
+      data.slice(offset).writeUInt8(encode(value, 8), 0);
       return true;
     case PropType.Int8:
       /* istanbul ignore next */
@@ -408,8 +389,8 @@ const setValue = (
       return true;
     case PropType.UInt16:
       // offset may be negative
-      if (be) data.slice(offset).writeUInt16BE(encode(value, 16));
-      else data.slice(offset).writeUInt16LE(encode(value, 16));
+      if (be) data.slice(offset).writeUInt16BE(encode(value, 16), 0);
+      else data.slice(offset).writeUInt16LE(encode(value, 16), 0);
       return true;
     case PropType.Int16:
       /* istanbul ignore next */
@@ -419,8 +400,8 @@ const setValue = (
       return true;
     case PropType.UInt32:
       // offset may be negative
-      if (be) data.slice(offset).writeUInt32BE(encode(value, 32));
-      else data.slice(offset).writeUInt32LE(encode(value, 32));
+      if (be) data.slice(offset).writeUInt32BE(encode(value, 32), 0);
+      else data.slice(offset).writeUInt32LE(encode(value, 32), 0);
       return true;
     case PropType.Int32:
       /* istanbul ignore next */
@@ -459,12 +440,12 @@ const setValue = (
       data.writeUInt8(Math.floor(Number(value) / 10) * 16 + (Number(value) % 10), offset);
       return true;
     case PropType.BigInt64:
-      if (be) data.writeBigInt64BE(BigInt(value), offset);
-      else data.writeBigInt64LE(BigInt(value), offset);
+      if (be) data.writeBigInt64BE(BigInt(value) as any, offset);
+      else data.writeBigInt64LE(BigInt(value) as any, offset);
       return true;
     case PropType.BigUInt64:
-      if (be) data.writeBigUInt64BE(BigInt(value), offset);
-      else data.writeBigUInt64LE(BigInt(value), offset);
+      if (be) data.writeBigUInt64BE(BigInt(value) as any, offset);
+      else data.writeBigUInt64LE(BigInt(value) as any, offset);
       return true;
     /* istanbul ignore next */
     default:
@@ -535,16 +516,12 @@ const getTypedArrayConstructor = (
 
 const getString = (buf: Buffer, encoding: string): string => {
   let end: number | undefined = buf.indexOf(0);
-  if (end < 0) end = buf.length;
-  return iconvDecode
-    ? iconvDecode(buf.slice(0, end), encoding)
-    : buf.toString(encoding as BufferEncoding, 0, end);
+  if (end! < 0) end = buf.length;
+  return buf.toString(encoding, 0, end);
 };
 
 const setString = (buf: Buffer, encoding: string, value: string): void => {
-  const encoded = iconvEncode
-    ? iconvEncode(value, encoding)
-    : Buffer.from(value, encoding as BufferEncoding);
+  const encoded = Buffer.from(value, encoding);
   if (encoded.length > buf.length) throw new TypeError(`String is too long`);
   encoded.copy(buf);
   buf.fill(0, encoded.length);
@@ -623,14 +600,6 @@ const createPropDesc = (info: PropDesc, data: Buffer): PropertyDescriptor => {
       setString(getBuf(index), encoding, value);
     const target = [...Array(len)];
     Object.defineProperties(target, {
-      length: { value: len },
-      [inspect.custom]: {
-        value: (...args: Parameters<typeof inspect>) =>
-          inspect(
-            target.map((_, index) => getter(index)),
-            ...args.slice(1)
-          ),
-      },
       [Symbol.iterator]: {
         value: function* iterator() {
           for (let i = 0; i < len; i += 1) {
@@ -1845,7 +1814,7 @@ export default class Struct<
         if (typeof rawOrSize === 'number' || rawOrSize === undefined) {
           $raw = Buffer.alloc(size);
         } else {
-          $raw = clone || Array.isArray(rawOrSize) ? Buffer.from(rawOrSize) : rawOrSize;
+          $raw = clone || Array.isArray(rawOrSize) ? Buffer.from(rawOrSize as number[]) : rawOrSize;
         }
         Object.defineProperty(this, '$raw', { value: $raw });
         defineProps(this, props, $raw);
